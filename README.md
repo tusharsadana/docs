@@ -1,55 +1,64 @@
-# Mintlify Starter Kit
+# Hercules External API — Developer Portal
 
-Use the starter kit to get your docs deployed and ready to customize.
+The public documentation site for the **Hercules External API**, built with
+[Mintlify](https://mintlify.com). It combines narrative guides with an
+interactive API reference generated from the service's OpenAPI specification.
 
-Click the green **Use this template** button at the top of this repo to copy the Mintlify starter kit. The starter kit contains examples with
+## Structure
 
-- Guide pages
-- Navigation
-- Customizations
-- API reference pages
-- Use of popular components
+```
+docs.json                     # Site config: branding + navigation (Guides + API Reference tabs)
+index.mdx                     # Landing page
+quickstart.mdx                # End-to-end first integration
+guides/                       # Narrative guides
+  authentication.mdx
+  uploading-files.mdx
+  polling-status.mdx
+  discovering-results.mdx
+  exporting-results.mdx
+  webhooks.mdx
+  errors-and-rate-limits.mdx
+api-reference/
+  openapi.json                # Generated spec — drives the API Reference tab
+scripts/
+  export_openapi.py           # Regenerates api-reference/openapi.json from the live app
+```
 
-**[Follow the full quickstart guide](https://starter.mintlify.com/quickstart)**
+## Local preview
 
-## AI-assisted writing
-
-Set up your AI coding tool to work with Mintlify:
+Install the [Mintlify CLI](https://www.npmjs.com/package/mint) and run from the
+repo root (where `docs.json` lives):
 
 ```bash
-npx skills add https://mintlify.com/docs
-```
-
-This command installs Mintlify's documentation skill for your configured AI tools like Claude Code, Cursor, Windsurf, and others. The skill includes component reference, writing standards, and workflow guidance.
-
-See the [AI tools guides](/ai-tools) for tool-specific setup.
-
-## Development
-
-Install the [Mintlify CLI](https://www.npmjs.com/package/mint) to preview your documentation changes locally. To install, use the following command:
-
-```
 npm i -g mint
+mint dev                 # preview at http://localhost:3000
+mint broken-links        # validate internal links
 ```
 
-Run the following command at the root of your documentation, where your `docs.json` is located:
+## Updating the API reference
 
+`api-reference/openapi.json` is generated from the External API's FastAPI app, so
+it stays accurate without a running service. Regenerate it after any route change.
+
+The script imports the app, so it must run inside the Hercules monorepo's Python
+environment (not this repo's). `app.openapi()` only introspects routes — no
+database or network — but importing the app validates two secrets, so pass
+throwaway-but-valid values:
+
+```bash
+EXTAPI_AUTH__JWT_SECRET_KEY="$(openssl rand -hex 32)" \
+EXTAPI_WEBHOOKS__SECRET_ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')" \
+uv run --project /path/to/hercules-framework/framework/apps/external_api \
+  python /path/to/this-repo/scripts/export_openapi.py
 ```
-mint dev
-```
 
-View your local preview at `http://localhost:3000`.
+Commit the regenerated `api-reference/openapi.json`.
 
-## Publishing changes
+## Publishing
 
-Install our GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app) to propagate changes from your repo to your deployment. Changes are deployed to production automatically after pushing to the default branch.
+This repo is connected to Mintlify via its GitHub app. **Pushing to `main`
+deploys to production automatically** (~30s). Pull requests get preview deploys.
 
-## Need help?
-
-### Troubleshooting
-
-- If your dev environment isn't running: Run `mint update` to ensure you have the most recent version of the CLI.
-- If a page loads as a 404: Make sure you are running in a folder with a valid `docs.json`.
-
-### Resources
-- [Mintlify documentation](https://mintlify.com/docs)
+To put the site on a custom domain (e.g. `developers.hercules.ai`), configure the
+domain in the Mintlify dashboard and add the provided CNAME record in Cloudflare
+DNS. (Custom domains require a paid Mintlify plan.)

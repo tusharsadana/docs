@@ -1,0 +1,302 @@
+---
+title: "Webhooks"
+description: "Receive signed, real-time event notifications instead of polling."
+---
+
+Hercules can push real-time notifications to your HTTPS endpoint whenever key
+events occur — files uploaded, batches processed, exports ready, and more. This
+guide covers registration, URL verification, signature verification, retries,
+and all event types.
+
+<Note>
+  Webhook endpoints require the `webhooks:manage` scope. See [Authentication](/guides/authentication#scopes).
+</Note>
+
+## 1. Register an endpoint
+
+```bash
+curl -X POST https://api.hercules.ai/v1/webhooks \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-server.example.com/webhooks/hercules",
+    "event_types": ["file.uploaded", "batch.status_changed", "export.ready"],
+    "description": "Production webhook"
+  }'
+```
+
+Response (`201`):
+
+```json
+{
+  "webhook_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "url": "https://your-server.example.com/webhooks/hercules",
+  "event_types": ["file.uploaded", "batch.status_changed", "export.ready"],
+  "signing_secret": "whsec_...",
+  "verified": false,
+  "verification_error": null,
+  "is_active": true,
+  "created_at": "2026-05-05T10:00:00Z"
+}
+```
+
+<Warning>
+  **Save the `signing_secret` immediately** — it is shown only once. It is used to
+  verify that every delivery comes from Hercules (see [Signature verification](#3-signature-verification)).
+</Warning>
+
+The endpoint starts **unverified**. Hercules sends a challenge request in the
+background and marks it verified within ~30 seconds. Until verification succeeds,
+no events are delivered. You can poll `GET /v1/webhooks/{webhook_id}` until
+`verified` is `true`.
+
+### Supported event types
+
+| Event type | Triggered when |
+| --- | --- |
+| `file.uploaded` | A file is accepted and queued for processing. |
+| `file.status_changed` | A file moves to a new processing status. |
+| `batch.created` | A batch (preinvoice) row is created. |
+| `batch.rows_appended` | Entry rows are added to an existing batch. |
+| `batch.finalized` | No more entries will be appended. |
+| `batch.status_changed` | Batch moves to a new status. |
+| `batch.completed` | Batch processing finished successfully. |
+| `batch.failed` | Batch processing failed. |
+| `batch.needs_review` | Batch is waiting for manual review. |
+| `batch.branch_escalated` | A branch within a batch was escalated. |
+| `contract.uploaded` | A contract file is accepted. |
+| `contract.status_changed` | Contract moves to a new status. |
+| `export.ready` | An export is ready to download. |
+
+## 2. URL ownership verification
+
+When you register (or re-trigger `/verify`), Hercules sends a `GET` request to
+your URL with a verification token header:
+
+```
+X-Hercules-Verification-Token: vrf_<64-hex>
+```
+
+Your server must respond within **10 seconds** with HTTP `200` and the token in
+the body:
+
+```
+vrf_<64-hex>
+```
+
+If verification fails, you can retry:
+
+```bash
+curl -X POST https://api.hercules.ai/v1/webhooks/$WEBHOOK_ID/verify \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+This returns `202 {"queued": true}` and runs asynchronously — poll
+`GET /v1/webhooks/{webhook_id}` until `verified` is `true`.
+
+## 3. Signature verification
+
+Every delivery includes three headers:
+
+| Header | Example value |
+| --- | --- |
+| `X-Hercules-Signature` | `v1,kid=primary,sig=<sha256-hex>` |
+| `X-Hercules-Timestamp` | `1714900000` (Unix seconds) |
+| `X-Hercules-Idempotency-Key` | `evt_<event-id-hex>` |
+
+The signature covers `<timestamp>.<raw-request-body>` and is computed with
+HMAC-SHA256 using the **raw hex key** — the `signing_secret` value from
+registration has a `whsec_` prefix that must be stripped before use.
+
+<Warning>
+  **Never skip verification.** Accept only requests where the computed signature
+  matches and the timestamp is within ±5 minutes of now.
+</Warning>
+
+<CodeGroup>
+```python python
+import hashlib
+import hmac
+import time
+
+def verify_hercules_webhook(
+    body: bytes,
+    signature_header: str,  # X-Hercules-Signature
+    timestamp_header: str,  # X-Hercules-Timestamp
+    signing_secret: str,    # the "whsec_<hex>" value from registration
+    tolerance_seconds: int = 300,
+) -> bool:
+    ts = int(timestamp_header)
+    if abs(time.time() - ts) > tolerance_seconds:
+        return False  # replay attack window exceeded
+
+    # Strip the "whsec_" prefix — the HMAC key is the raw hex string
+    raw_secret = signing_secret.removeprefix("whsec_")
+
+    # Parse 'v1,kid=primary,sig=<hex>' — there may be two during key rotation
+    for part in signature_header.split(" "):
+        for segment in part.split(","):
+            if segment.startswith("sig="):
+                expected = segment[4:]
+                payload = f"{ts}.".encode() + body
+                computed = hmac.new(
+                    raw_secret.encode(), payload, hashlib.sha256
+                ).hexdigest()
+                if hmac.compare_digest(computed, expected):
+                    return True
+    return False
+```
+
+```javascript node
+const crypto = require("crypto");
+
+function verifyHerculesWebhook(body, signatureHeader, timestampHeader, signingSecret, toleranceSec = 300) {
+  const ts = parseInt(timestampHeader, 10);
+  if (Math.abs(Date.now() / 1000 - ts) > toleranceSec) return false;
+
+  // Strip the "whsec_" prefix — the HMAC key is the raw hex string
+  const rawSecret = signingSecret.startsWith("whsec_") ? signingSecret.slice(6) : signingSecret;
+
+  const payload = Buffer.concat([Buffer.from(`${ts}.`), Buffer.from(body)]);
+  const computed = crypto.createHmac("sha256", rawSecret).update(payload).digest("hex");
+
+  for (const part of signatureHeader.split(" ")) {
+    for (const segment of part.split(",")) {
+      if (segment.startsWith("sig=")) {
+        const expected = segment.slice(4);
+        if (crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(expected))) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+```
+</CodeGroup>
+
+## 4. Event payload
+
+```json
+{
+  "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "event_type": "file.uploaded",
+  "client_id": "my-client",
+  "resource_id": "1042",
+  "data": {
+    "file_id": 1042,
+    "external_id": "inv-2026-001",
+    "target": "contracts",
+    "filename": "invoice.pdf",
+    "status": "uploading"
+  },
+  "created_at": "2026-05-05T10:00:00Z"
+}
+```
+
+`resource_id` is always the string-encoded Hyperframe row ID of the primary resource.
+
+### Custom payload templates
+
+You can reshape the payload per endpoint using a template object with `$.path`
+JSONPath expressions and the `@now` token:
+
+```json
+{
+  "payload_template": {
+    "type": "$.event_type",
+    "resource": "$.resource_id",
+    "ts": "@now",
+    "file": "$.data.filename"
+  }
+}
+```
+
+Preview a rendered template before registering:
+
+```bash
+curl -X POST https://api.hercules.ai/v1/webhooks/preview \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "event_type": "file.uploaded",
+    "template": {"type": "$.event_type", "file": "$.data.filename"}
+  }'
+```
+
+## 5. Idempotency
+
+Each delivery carries `X-Hercules-Idempotency-Key: evt_<event-id-hex>`. The same
+key is retried on failure — use it to deduplicate on your side:
+
+```python
+if db.already_processed(request.headers["X-Hercules-Idempotency-Key"]):
+    return Response(status_code=200)
+```
+
+## 6. Retry behaviour
+
+Hercules retries failed deliveries with exponential backoff:
+
+| Attempt | Delay (approx.) |
+| --- | --- |
+| 1 | ~1 min |
+| 2 | ~2 min |
+| 3 | ~4 min |
+| 4 | ~8 min |
+| 5 | ~16 min |
+| 6 | ~32 min → permanent failure |
+
+A delivery is considered successful when your endpoint returns **any 2xx status
+code** within 30 seconds. Return `200 OK` as quickly as possible and process
+asynchronously.
+
+The following HTTP status codes are **non-retryable** and immediately mark the
+event as `failed_permanent`: `400`, `401`, `403`, `404`, `410`, `422`.
+
+## 7. Key rotation
+
+To rotate your signing secret without downtime, use a 1-hour overlap period:
+
+```bash
+curl -X POST https://api.hercules.ai/v1/webhooks/$WEBHOOK_ID/rotate-secret \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"overlap_seconds": 3600}'
+```
+
+During the overlap window, deliveries include **two** `sig=` entries in
+`X-Hercules-Signature` — one per key. Accept either. After
+`previous_secret_expires_at`, only the new key is used.
+
+## 8. Testing
+
+Send a test delivery with sample data:
+
+```bash
+curl -X POST https://api.hercules.ai/v1/webhooks/$WEBHOOK_ID/test \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"event_type": "file.uploaded"}'
+```
+
+Test deliveries are sent even before verification succeeds, so you can confirm
+your handler works during integration.
+
+## 9. Management endpoints
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/v1/webhooks` | List all registered endpoints. |
+| `GET` | `/v1/webhooks/{id}` | Get endpoint details. |
+| `PATCH` | `/v1/webhooks/{id}` | Update an endpoint. |
+| `DELETE` | `/v1/webhooks/{id}` | Delete an endpoint. |
+| `GET` | `/v1/webhooks/{id}/events` | Paginated event history. |
+| `GET` | `/v1/webhooks/events/{event_id}` | Full event detail + delivery attempts. |
+| `POST` | `/v1/webhooks/{id}/verify` | Re-trigger URL verification. |
+| `POST` | `/v1/webhooks/{id}/rotate-secret` | Rotate signing secret. |
+| `POST` | `/v1/webhooks/{id}/test` | Send a test delivery. |
+| `GET` | `/v1/webhooks/event-types` | List all supported event types. |
+| `POST` | `/v1/webhooks/preview` | Preview a custom payload template. |
+
+See the [API Reference](/api-reference) for the full request and response schema of each.

@@ -1,0 +1,99 @@
+---
+title: "Authentication"
+description: "Exchange client credentials for a short-lived OAuth2 bearer token."
+---
+
+The External API uses the **OAuth2 client-credentials grant**. Each integration
+receives a `client_id` and `client_secret` pair and exchanges them for a
+short-lived bearer token used on every subsequent request.
+
+<Note>
+  Credentials are issued by Hercules and shown only once. Store the
+  `client_secret` in a secrets manager — it cannot be retrieved later.
+  Need credentials? [Contact support](mailto:support@hercules.ai).
+</Note>
+
+## Get a token
+
+<CodeGroup>
+```bash curl
+curl -X POST https://api.hercules.ai/v1/auth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=$CLIENT_ID" \
+  -d "client_secret=$CLIENT_SECRET" \
+  -d "scope=files:write exports:read"
+```
+
+```python python
+import requests
+
+resp = requests.post(
+    "https://api.hercules.ai/v1/auth/token",
+    data={
+        "grant_type": "client_credentials",
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        # scope is optional; defaults to all granted scopes
+        "scope": "files:write exports:read",
+    },
+)
+token = resp.json()["access_token"]
+```
+
+```javascript node
+const body = new URLSearchParams({
+  grant_type: "client_credentials",
+  client_id: process.env.CLIENT_ID,
+  client_secret: process.env.CLIENT_SECRET,
+  scope: "files:write exports:read",
+});
+
+const resp = await fetch("https://api.hercules.ai/v1/auth/token", {
+  method: "POST",
+  headers: { "Content-Type": "application/x-www-form-urlencoded" },
+  body,
+});
+const { access_token } = await resp.json();
+```
+</CodeGroup>
+
+The `scope` parameter is optional — omit it to receive all scopes granted to your client.
+
+### Response
+
+```json
+{
+  "access_token": "eyJ...",
+  "token_type": "bearer",
+  "expires_in": 3600,
+  "scope": "files:write exports:read"
+}
+```
+
+Tokens expire after **1 hour** (`expires_in` is in seconds). Request a new token
+before expiry; there is no refresh token in the client-credentials flow.
+
+## Use the token
+
+Include the token as a bearer credential on every request:
+
+```
+Authorization: Bearer {access_token}
+```
+
+## Scopes
+
+Scopes gate which operations a token may perform. A request with an
+insufficient scope is rejected with `403 Forbidden`.
+
+| Scope | Access |
+| --- | --- |
+| `files:write` | Upload and reprocess files (contracts, transaction data) |
+| `exports:read` | Download validation results |
+| `webhooks:manage` | Register and manage webhook endpoints |
+
+<Warning>
+  Treat the `client_secret` like a password. If it is exposed, contact support to
+  rotate it. Never embed credentials in client-side code or commit them to source control.
+</Warning>

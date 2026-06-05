@@ -1,0 +1,123 @@
+---
+title: "Exporting results"
+description: "Download validation results as JSON or a formatted Excel workbook."
+---
+
+Export validation results for any processed file — as structured JSON for
+programmatic use, or as a `.xlsx` workbook for review.
+
+## Export as JSON
+
+```
+GET /v1/exports/validation/{file_id}
+Authorization: Bearer {token}
+```
+
+<ParamField query="mode" type="string" default="issues">
+  `issues` returns only flagged rows; `all` returns every row.
+</ParamField>
+
+<ParamField query="format" type="string" default="json">
+  `json` (default) or `xlsx`.
+</ParamField>
+
+<ParamField query="page" type="integer" default="1">
+  Page number.
+</ParamField>
+
+<ParamField query="page_size" type="integer" default="500">
+  Rows per page. Maximum `5000`.
+</ParamField>
+
+### Response
+
+```json
+{
+  "rows": [
+    {
+      "values": {
+        "employee_name": "John Smith",
+        "bill_rate": 25.50,
+        "wage_code": "REG"
+      },
+      "annotations": {
+        "bill_rate": {
+          "flag": "invalid",
+          "recommendation": "Expected rate is $28.00 per contract"
+        }
+      }
+    }
+  ],
+  "summary": {
+    "total_rows": 100,
+    "filtered_count": 3,
+    "violations": 2,
+    "warnings": 1
+  }
+}
+```
+
+- `values` — the row's field values.
+- `annotations` — per-field validation findings, keyed by field name. Each carries a `flag` and a human-readable `recommendation`.
+- `summary` — counts across the export (total rows, rows returned after filtering, violations, warnings).
+
+## Export as Excel
+
+Add `format=xlsx` to download a formatted workbook instead of JSON:
+
+```bash
+curl "https://api.hercules.ai/v1/exports/validation/$FILE_ID?format=xlsx" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -o validation_results.xlsx
+```
+
+Returns a downloadable `.xlsx` file.
+
+## Listing files
+
+To find file IDs to export — including the child rows from a split upload — list
+files for a target:
+
+```
+GET /v1/files?target={target}
+Authorization: Bearer {token}
+```
+
+<ParamField query="page" type="integer" default="1">
+  Page number.
+</ParamField>
+
+<ParamField query="page_size" type="integer" default="50">
+  Rows per page. Maximum `200`.
+</ParamField>
+
+<ParamField query="file_status" type="string">
+  Filter by status (e.g. `completed`, `needs_review`).
+</ParamField>
+
+<ParamField query="source_upload_id" type="integer">
+  Filter by parent upload ID — used to [discover split results](/guides/discovering-results).
+</ParamField>
+
+```json
+{
+  "items": [
+    {
+      "file_id": 42,
+      "target": "preinvoice_data",
+      "status": "completed",
+      "filename": "weekly_preinvoice.xlsx"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "page_size": 50
+}
+```
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `items` | array | File records for the current page. |
+| `total` | integer | Total matching files across all pages. |
+| `page` | integer | Current page number. |
+| `page_size` | integer | Number of items per page. |

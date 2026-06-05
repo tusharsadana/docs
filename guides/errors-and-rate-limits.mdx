@@ -1,0 +1,68 @@
+---
+title: "Errors & rate limits"
+description: "RFC 7807 error responses, status codes, rate limiting, and correlation IDs."
+---
+
+## Error responses
+
+All errors follow [RFC 7807 (Problem Details for HTTP APIs)](https://datatracker.ietf.org/doc/html/rfc7807):
+
+```json
+{
+  "type": "about:blank",
+  "title": "invalid_client",
+  "status": 401,
+  "detail": "invalid_client",
+  "instance": "/v1/auth/token",
+  "correlation_id": "d64b960a-7f46-49b7-9254-a93b85fb8801"
+}
+```
+
+Every response includes a `correlation_id` (also returned in the
+`X-Correlation-ID` response header). Include it when contacting support — it lets
+us trace the exact request.
+
+### Status codes
+
+| Status | Meaning |
+| --- | --- |
+| `400` | Bad request. |
+| `401` | Unauthorized — invalid or expired token. |
+| `403` | Forbidden — token lacks the required [scope](/guides/authentication#scopes). |
+| `404` | Resource not found. |
+| `409` | Conflict — e.g. a duplicate `external_id` handled via [idempotency](/guides/uploading-files#idempotency). |
+| `422` | Validation error — missing or invalid parameters. |
+| `429` | Rate limit exceeded. |
+
+## Rate limiting
+
+The API allows **60 requests per minute per IP address**. When you exceed the
+limit, you receive a `429`:
+
+```json
+{
+  "title": "Rate Limit Exceeded",
+  "status": 429,
+  "detail": "Rate limit of 60 requests per minute exceeded"
+}
+```
+
+The `Retry-After` response header indicates how many seconds to wait before retrying.
+
+<Tip>
+  Back off when you see a `429` — wait for the number of seconds in `Retry-After`
+  before retrying. For high-volume status tracking, prefer
+  [webhooks](/guides/webhooks) over tight polling loops.
+</Tip>
+
+## Health checks
+
+Two unauthenticated endpoints report service health:
+
+```
+GET /v1/health   ->  {"status": "ok"}
+GET /v1/ready    ->  {"status": "ok", "checks": {"database": "ok", "redis": "ok"}}
+```
+
+- `/v1/health` is a liveness probe — it always returns `200` if the service is running.
+- `/v1/ready` is a readiness probe — it checks downstream dependencies (database, Redis).

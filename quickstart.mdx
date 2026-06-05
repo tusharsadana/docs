@@ -1,47 +1,138 @@
 ---
 title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+description: "From client credentials to a validated result in a few minutes."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
+This guide takes you end to end: get a token, upload a file, wait for processing,
+and export the result.
 
 ## Prerequisites
 
-Before you begin, you must have:
+- A `client_id` and `client_secret` issued by Hercules. <br/>Don't have them yet? [Contact support](mailto:support@hercules.ai).
+- The base URL for your environment (examples below use `https://api.hercules.ai`).
+- A file to upload — a contract PDF, or pre-invoice data as `.xlsx`/`.csv`.
 
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+## Validate pre-invoice data
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
+  <Step title="Get an access token">
+    Exchange your credentials for a bearer token. Tokens are valid for one hour.
+
+    <CodeGroup>
+    ```bash curl
+    curl -X POST https://api.hercules.ai/v1/auth/token \
+      -H "Content-Type: application/x-www-form-urlencoded" \
+      -d "grant_type=client_credentials" \
+      -d "client_id=$CLIENT_ID" \
+      -d "client_secret=$CLIENT_SECRET"
+    ```
+
+    ```python python
+    import requests
+
+    resp = requests.post(
+        "https://api.hercules.ai/v1/auth/token",
+        data={
+            "grant_type": "client_credentials",
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+        },
+    )
+    token = resp.json()["access_token"]
+    ```
+    </CodeGroup>
+
+    See [Authentication](/guides/authentication) for scopes and token details.
+  </Step>
+
+  <Step title="Upload a file">
+    Upload your pre-invoice data with a unique `external_id` for idempotency.
+
+    <CodeGroup>
+    ```bash curl
+    curl -X POST "https://api.hercules.ai/v1/files?target=preinvoice_data" \
+      -H "Authorization: Bearer $ACCESS_TOKEN" \
+      -F "file=@weekly_preinvoice.xlsx" \
+      -F "external_id=batch-2026-w17"
+    ```
+
+    ```python python
+    resp = requests.post(
+        "https://api.hercules.ai/v1/files",
+        params={"target": "preinvoice_data"},
+        headers={"Authorization": f"Bearer {token}"},
+        files={"file": open("weekly_preinvoice.xlsx", "rb")},
+        data={"external_id": "batch-2026-w17"},
+    )
+    file_id = resp.json()["file_id"]
+    ```
+    </CodeGroup>
+
+    The response returns a `file_id` you'll use to track and export results.
+  </Step>
+
+  <Step title="Poll until processing completes">
+    Poll the lightweight status endpoint until the file reaches `done`.
 
     ```bash
-    npm install your-package
+    curl "https://api.hercules.ai/v1/files/$FILE_ID/status?target=preinvoice_data" \
+      -H "Authorization: Bearer $ACCESS_TOKEN"
+    # -> {"file_id": 42, "status": "done"}
+    ```
+
+    For pre-invoice data, `done` means the file was parsed, split by branch, and
+    validation has started on the resulting rows. See [Polling status](/guides/polling-status).
+  </Step>
+
+  <Step title="Discover child rows">
+    A pre-invoice upload may split into multiple groups (e.g. one per branch).
+    List them with `source_upload_id`.
+
+    ```bash
+    curl "https://api.hercules.ai/v1/files?target=preinvoice_data&source_upload_id=$FILE_ID" \
+      -H "Authorization: Bearer $ACCESS_TOKEN"
+    ```
+
+    See [Discovering results](/guides/discovering-results) for the full flow.
+  </Step>
+
+  <Step title="Export the validation results">
+    Export issues (or everything) for each child row, as JSON or Excel.
+
+    ```bash
+    curl "https://api.hercules.ai/v1/exports/validation/$CHILD_FILE_ID" \
+      -H "Authorization: Bearer $ACCESS_TOKEN"
+    ```
+
+    See [Exporting results](/guides/exporting-results) for modes, pagination, and Excel output.
+  </Step>
+</Steps>
+
+## Upload a contract
+
+The contract flow is simpler — there are no child rows to discover:
+
+<Steps>
+  <Step title="Get a token">
+    Same as above — `POST /v1/auth/token`.
+  </Step>
+  <Step title="Upload the PDF">
+    ```bash
+    curl -X POST "https://api.hercules.ai/v1/files?target=contracts" \
+      -H "Authorization: Bearer $ACCESS_TOKEN" \
+      -F "file=@contract.pdf" \
+      -F "external_id=contract-acme-2026"
     ```
   </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
-
+  <Step title="Poll until done">
     ```bash
-    your-cli init
+    curl "https://api.hercules.ai/v1/files/$FILE_ID/status?target=contracts" \
+      -H "Authorization: Bearer $ACCESS_TOKEN"
     ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
-
-    ```bash
-    your-cli start
-    ```
+    For contracts, `done` means AI extraction has run and rules were created from the contract.
   </Step>
 </Steps>
 
 <Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
-
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+  Need help getting started? Reach out at [support@hercules.ai](mailto:support@hercules.ai).
 </Tip>

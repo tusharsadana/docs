@@ -1,0 +1,75 @@
+---
+title: "Discovering results"
+description: "Find the per-branch child rows produced when a pre-invoice file is split."
+---
+
+When a pre-invoice file is uploaded, the ingestion pipeline may split it into
+multiple groups — for example, one per branch. Each group is validated
+**independently** and exported separately.
+
+## List child rows from an upload
+
+Filter the file list by `source_upload_id` (the parent `file_id`) to discover
+the child rows:
+
+```
+GET /v1/files?target=preinvoice_data&source_upload_id={file_id}
+Authorization: Bearer {token}
+```
+
+```json
+{
+  "items": [
+    {
+      "file_id": 67,
+      "target": "preinvoice_data",
+      "status": "completed",
+      "filename": "weekly_preinvoice.xlsx"
+    },
+    {
+      "file_id": 68,
+      "target": "preinvoice_data",
+      "status": "needs_review",
+      "filename": "weekly_preinvoice.xlsx"
+    }
+  ],
+  "total": 2,
+  "page": 1,
+  "page_size": 50
+}
+```
+
+Each child row can be individually exported using the
+[export endpoint](/guides/exporting-results).
+
+## Child row statuses
+
+| Status | Meaning |
+| --- | --- |
+| `validating` | Validation is in progress. |
+| `completed` | Validation done, no issues remaining. |
+| `needs_review` | Validation found issues that need human review. |
+| `branch_escalated` | Escalated to branch-level review. |
+
+## Typical flow
+
+<Steps>
+  <Step title="Upload the pre-invoice file">
+    `POST /v1/files?target=preinvoice_data` → returns the parent `file_id`.
+  </Step>
+  <Step title="Wait for the parent to reach done">
+    Poll `GET /v1/files/{file_id}/status?target=preinvoice_data` until `done`.
+  </Step>
+  <Step title="List the child rows">
+    `GET /v1/files?target=preinvoice_data&source_upload_id={file_id}` — paginated.
+  </Step>
+  <Step title="Export each child">
+    `GET /v1/exports/validation/{child_file_id}` for per-branch results.
+  </Step>
+</Steps>
+
+<Note>
+  The list endpoint is paginated (`page`, `page_size`). Iterate through pages
+  until you've collected all child rows. See [Exporting results](/guides/exporting-results#listing-files)
+  for the full set of list filters.
+</Note>

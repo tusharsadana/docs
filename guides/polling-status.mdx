@@ -1,0 +1,77 @@
+---
+title: "Polling status"
+description: "Track a file from upload to a terminal processing state."
+---
+
+After uploading, poll one of two status endpoints until the file reaches a
+terminal state. Prefer the lightweight endpoint for frequent polling.
+
+<Tip>
+  Prefer [webhooks](/guides/webhooks) over polling where you can — subscribe to
+  `file.status_changed` and `batch.status_changed` to be notified instead of
+  polling on a timer.
+</Tip>
+
+## Full status
+
+Returns the full file record, including filename and row count when available.
+
+```
+GET /v1/files/{file_id}?target={target}
+Authorization: Bearer {token}
+```
+
+```json
+{
+  "file_id": 42,
+  "target": "preinvoice_data",
+  "status": "done",
+  "filename": "weekly_preinvoice.xlsx",
+  "row_count": 26
+}
+```
+
+## Lightweight status
+
+Optimized for frequent polling — returns only the identifier and status.
+
+```
+GET /v1/files/{file_id}/status?target={target}
+Authorization: Bearer {token}
+```
+
+```json
+{
+  "file_id": 42,
+  "status": "done"
+}
+```
+
+## Status progressions
+
+<Tabs>
+  <Tab title="Contracts">
+    ```
+    uploading -> extracting -> done
+    ```
+    If extraction fails: `uploading -> error`.
+
+    `done` means AI extraction has run and rules were created from the contract.
+  </Tab>
+  <Tab title="Pre-invoice data">
+    ```
+    uploading -> ingesting -> done
+    ```
+    If ingestion fails: `uploading -> error`.
+
+    `done` means the file was parsed, split by branch (if configured), and
+    validation has **started** on the resulting rows. To track validation of
+    those rows, see [Discovering results](/guides/discovering-results).
+  </Tab>
+</Tabs>
+
+<Note>
+  For pre-invoice data, the parent file reaching `done` only signals that
+  validation has begun. Per-branch validation outcomes live on the child rows —
+  poll those (or subscribe to `batch.status_changed`) to know when validation finishes.
+</Note>

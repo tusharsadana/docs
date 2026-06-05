@@ -1,0 +1,82 @@
+---
+title: "Uploading files"
+description: "Send contracts and pre-invoice data through a single upload endpoint."
+---
+
+A single endpoint handles all file types. The `target` query parameter selects
+the processing pipeline that runs after upload.
+
+## Upload a file
+
+```
+POST /v1/files?target={target}
+Authorization: Bearer {token}
+Content-Type: multipart/form-data
+```
+
+<ParamField query="target" type="string" required>
+  The processing pipeline to route the file to. One of `contracts` or `preinvoice_data`.
+</ParamField>
+
+<ParamField body="file" type="file" required>
+  The file binary, sent as `multipart/form-data`.
+</ParamField>
+
+<ParamField body="external_id" type="string" required>
+  A client-provided unique identifier used for [idempotency](#idempotency).
+</ParamField>
+
+<CodeGroup>
+```bash curl
+curl -X POST "https://api.hercules.ai/v1/files?target=preinvoice_data" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -F "file=@weekly_preinvoice.xlsx" \
+  -F "external_id=batch-2026-w17"
+```
+
+```python python
+resp = requests.post(
+    "https://api.hercules.ai/v1/files",
+    params={"target": "preinvoice_data"},
+    headers={"Authorization": f"Bearer {token}"},
+    files={"file": open("weekly_preinvoice.xlsx", "rb")},
+    data={"external_id": "batch-2026-w17"},
+)
+file_id = resp.json()["file_id"]
+```
+</CodeGroup>
+
+### Response
+
+```json
+{
+  "file_id": 42,
+  "external_id": "batch-2026-w17",
+  "target": "preinvoice_data",
+  "status": "uploading",
+  "created_at": "2026-04-24T10:00:00Z"
+}
+```
+
+Returns `201 Created`. Use the `file_id` to [poll status](/guides/polling-status)
+and [export results](/guides/exporting-results).
+
+## Targets
+
+| Target | File types | What happens after upload |
+| --- | --- | --- |
+| `contracts` | PDF | AI extraction runs, and rules are created from the contract. |
+| `preinvoice_data` | Excel (`.xlsx`), CSV | The file is parsed, split by branch, and validated against contract rules. |
+
+## Idempotency
+
+If you submit the same `external_id` for the same `target` again, the API returns
+the **original** response with HTTP `200` instead of creating a duplicate. This
+makes uploads safe to retry on network failures — reuse the same `external_id`
+and you will never create a duplicate file.
+
+<Tip>
+  Choose `external_id` values that are meaningful and unique in your own system
+  (e.g. `batch-2026-w17`, `contract-acme-2026`). They appear in responses and
+  make reconciliation easier.
+</Tip>
