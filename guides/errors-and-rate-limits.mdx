@@ -30,7 +30,7 @@ us trace the exact request.
 | `401` | Unauthorized — invalid or expired token. |
 | `403` | Forbidden — token lacks the required [scope](/guides/authentication#scopes). |
 | `404` | Resource not found. |
-| `409` | Conflict — e.g. a duplicate `external_id` handled via [idempotency](/guides/uploading-files#idempotency). |
+| `409` | Conflict — e.g. `request_in_progress`: an upload with the same `external_id` is still running; retry after `Retry-After` seconds (see [idempotency](/guides/uploading-files#while-the-first-upload-is-still-running)). |
 | `422` | Validation error — missing or invalid parameters. |
 | `429` | Rate limit exceeded. |
 
