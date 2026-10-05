@@ -75,6 +75,30 @@ the **original** response with HTTP `200` instead of creating a duplicate. This
 makes uploads safe to retry on network failures — reuse the same `external_id`
 and you will never create a duplicate file.
 
+### While the first upload is still running
+
+If a second request with the same `external_id` and `target` arrives while the
+first one has not finished yet, the API does not wait for it. It answers right
+away with `409` and a `Retry-After` header (in seconds, at most 10):
+
+```json
+{
+  "type": "about:blank",
+  "title": "request_in_progress",
+  "status": 409,
+  "detail": "request_in_progress",
+  "correlation_id": "…"
+}
+```
+
+Wait for the number of seconds in `Retry-After`, then send the same request
+again. Once the first upload has finished, the retry returns the original
+response with `200`. Exactly one file is created either way.
+
+If the first upload fails (for example the file could not be stored), its
+`external_id` is released immediately, so your retry is processed as a new
+upload rather than answered with `409`.
+
 <Tip>
   Choose `external_id` values that are meaningful and unique in your own system
   (e.g. `batch-2026-w17`, `contract-acme-2026`). They appear in responses and
